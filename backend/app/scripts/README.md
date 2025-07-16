@@ -12,3 +12,6 @@ python app/scripts/step2_generate_trd.py
 
 # Step 4: Generate Tasks using Task Master
 python app/scripts/step4_generate_tasks.py
+
+# Step 5: Generate Jira Tasks
+python app/scripts/step5_generate_jira_tasks.py
