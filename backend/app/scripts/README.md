@@ -4,5 +4,11 @@
 # Step 1: Generate PRD
 python app/scripts/step1_generate_prd.py
 
-# Step 2: Generate TRD
+# Step 2: Generate TSD
+python app/scripts/step2_generate_tsd.py
+
+# Step 3: Generate TRD
 python app/scripts/step2_generate_trd.py
+
+# Step 4: Generate Tasks using Task Master
+python app/scripts/step4_generate_tasks.py
