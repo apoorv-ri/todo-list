@@ -5,14 +5,14 @@ from load_dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-def generate_prd2():
+def generate_prd():
     """
-    Generates a Product Requirements Document (PRD2) using the Anthropic Claude API,
+    Generates a Product Requirements Document (PRD) using the Anthropic Claude API,
     taking project details as input and streaming the output to a file.
     """
-    prd2_output_file = "./docs/PRD2.md"
+    prd_output_file = "./docs/PRD.md"
 
-    print("Starting PRD2 generation process...")
+    print("Starting PRD generation process...")
 
     # --- Step 1: Initialize Anthropic Client ---
     # The Anthropic API key is typically loaded from an environment variable or configuration.
@@ -25,7 +25,7 @@ def generate_prd2():
         sys.exit(1)
 
     # --- Step 2: Get user input for project name and description ---
-    print("Please provide the following information to generate your PRD2:")
+    print("Please provide the following information to generate your PRD:")
     project_name = input("Project Name: ").strip()
     project_description = input("Short Description: ").strip()
 
@@ -37,18 +37,18 @@ def generate_prd2():
         print("Error: Project description cannot be empty.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Generating PRD2 for project: {project_name}")
+    print(f"Generating PRD for project: {project_name}")
 
-    # --- Step 3: Generate PRD2.md ---
-    print(f"Generating '{prd2_output_file}'...")
+    # --- Step 3: Generate PRD.md ---
+    print(f"Generating '{prd_output_file}'...")
 
     # Create docs directory if it doesn't exist
     # os.makedirs creates directories recursively; exist_ok=True prevents error if it already exists
-    os.makedirs(os.path.dirname(prd2_output_file), exist_ok=True)
+    os.makedirs(os.path.dirname(prd_output_file), exist_ok=True)
 
-    # Prompt for the PRD2 generation - comprehensive PRD content
+    # Prompt for the PRD generation - comprehensive PRD content
     # Using an f-string for easy variable interpolation
-    prd2_prompt = f"""Create a comprehensive Product Requirements Document for {project_name} - {project_description}
+    prd_prompt = f"""Create a comprehensive Product Requirements Document for {project_name} - {project_description}
 
 Include:
 - Executive summary with objectives
@@ -62,10 +62,10 @@ Include:
 
 Generate detailed content for each section."""
 
-    # Call Claude API to generate content and stream output to the PRD2 file
+    # Call Claude API to generate content and stream output to the PRD file
     try:
         # Open the output file in write mode ('w')
-        with open(prd2_output_file, 'w') as f_out:
+        with open(prd_output_file, 'w') as f_out:
             # Use client.messages.stream for streaming output, as requested.
             # max_tokens is set to a reasonable value for a document like a PRD.
             with client.messages.stream(
@@ -78,7 +78,7 @@ Generate detailed content for each section."""
                         "content": [
                             {
                                 "type": "text",
-                                "text": prd2_prompt
+                                "text": prd_prompt
                             }
                         ]
                     }
@@ -93,7 +93,7 @@ Generate detailed content for each section."""
                             # Optional: print to console as well to show real-time progress
                             sys.stdout.write(text_content)
                             sys.stdout.flush() # Ensure the output is immediately visible
-        print(f"\nSuccessfully generated '{prd2_output_file}'.") # Newline after streaming output
+        print(f"\nSuccessfully generated '{prd_output_file}'.") # Newline after streaming output
 
     except anthropic.APIError as e:
         # Catch specific API errors from Anthropic
@@ -104,10 +104,10 @@ Generate detailed content for each section."""
         print(f"An unexpected error occurred: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print("PRD2 generation complete.")
-    print(f"You can find the generated document at: '{prd2_output_file}'")
+    print("PRD generation complete.")
+    print(f"You can find the generated document at: '{prd_output_file}'")
     print("Please review the generated content, as AI-generated documents may require human refinement.")
 
-# This ensures that generate_prd2() is called only when the script is executed directly
+# This ensures that generate_prd() is called only when the script is executed directly
 if __name__ == "__main__":
-    generate_prd2()
+    generate_prd()
