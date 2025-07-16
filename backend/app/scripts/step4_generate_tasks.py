@@ -177,6 +177,22 @@ Break down larger tasks into logical sub-tasks. Ensure all aspects mentioned in 
     print(f"Please review the generated tasks at: '{tasks_output_file}'")
     print("AI-generated tasks may require human refinement and detailed planning.")
 
+    # Expand all tasks of the generated tasks file
+    try:
+        print("Expanding all tasks in the generated tasks file...")
+        subprocess.run(
+            [task_master_cli_path, "expand", "--all"],
+            check=True,
+            text=True
+        )
+        print(f"All tasks expanded successfully in '{tasks_output_file}'.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error expanding tasks: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print("You can now proceed to the next steps in your development workflow.")
+    print("Please ensure to review and refine the generated tasks as needed.")
+
 # This ensures that generate_tasks() is called only when the script is executed directly
 if __name__ == "__main__":
     generate_tasks()
