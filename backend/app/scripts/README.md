@@ -15,3 +15,6 @@ python app/scripts/step4_generate_tasks.py
 
 # Step 5: Generate Jira Tasks
 python app/scripts/step5_generate_jira_tasks.py
+
+# Step 6: Generate Gnatt Chart
+python app/scripts/step5_generate_gnatt_chart.py <Path of tasks.json> ./docs/gantt_chart.html 
