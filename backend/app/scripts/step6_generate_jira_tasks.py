@@ -29,7 +29,7 @@ import argparse
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import logging
-from load_dotenv import load_dotenv
+from dotenv import load_dotenv # Corrected import for load_dotenv
 
 load_dotenv()
 
@@ -53,7 +53,8 @@ class JiraTaskCreator:
             basic_auth=(email, api_token)
         )
         self.project_key = project_key
-        self.created_issues = {}  # Map task_id -> issue_key
+        # Map task_id -> Jira issue_key for both main tasks and subtasks
+        self.created_issues = {}
         
     def load_tasks(self, file_path: str = ".taskmaster/tasks/tasks.json") -> Dict[str, Any]:
         """Load tasks from JSON file."""
@@ -68,8 +69,16 @@ class JiraTaskCreator:
             logger.error(f"Invalid JSON in tasks file: {e}")
             sys.exit(1)
     
-    def create_issue(self, task: Dict[str, Any], parent_key: Optional[str] = None) -> str:
-        """Create a Jira issue from a task."""
+    def create_issue(self, task: Dict[str, Any], parent_key: Optional[str] = None, is_subtask: bool = False) -> Optional[str]:
+        """
+        Create a Jira issue from a task.
+        Args:
+            task (Dict): The task dictionary.
+            parent_key (Optional[str]): The Jira issue key of the parent task, if this is a sub-task.
+            is_subtask (bool): True if this task should be created as a sub-task.
+        Returns:
+            Optional[str]: The created Jira issue key, or None if creation failed.
+        """
         # Map task priority to Jira priority
         priority_map = {
             "high": "High",
@@ -77,16 +86,19 @@ class JiraTaskCreator:
             "low": "Low"
         }
         
+        issue_type_name = "Subtask" if is_subtask else "Task"
+
         # Create issue fields
         fields = {
             "project": {"key": self.project_key},
             "summary": task["title"],
             "description": self.format_description(task),
-            "issuetype": {"name": "Task"},
+            "issuetype": {"name": issue_type_name},
             "priority": {"name": priority_map.get(task.get("priority", "medium"), "Medium")}
         }
         
         if parent_key:
+            # For sub-tasks, the 'parent' field is required
             fields["parent"] = {"key": parent_key}
         
         # Add assignee if provided
@@ -96,10 +108,13 @@ class JiraTaskCreator:
         
         try:
             issue = self.jira.create_issue(fields=fields)
-            logger.info(f"Created issue: {issue.key} - {task['title']}")
+            logger.info(f"Created {issue_type_name}: {issue.key} - {task['title']}")
             return issue.key
         except JIRAError as e:
-            logger.error(f"Failed to create issue for task {task['id']}: {e}")
+            logger.error(f"Failed to create {issue_type_name} for task {task.get('id', task.get('title'))}: {e}")
+            # Log the full error details if available
+            if e.text:
+                logger.error(f"Jira API Error Details: {e.text}")
             return None
     
     def format_description(self, task: Dict[str, Any]) -> str:
@@ -113,6 +128,7 @@ class JiraTaskCreator:
         # Add details
         if task.get("details"):
             details = task["details"]
+            # Ensure details is treated as a string, join if it's a list
             if isinstance(details, list):
                 details = "\n".join(details)
             description_parts.append(f"h2. Implementation Details\n{details}")
@@ -120,27 +136,36 @@ class JiraTaskCreator:
         # Add test strategy
         if task.get("testStrategy"):
             test_strategy = task["testStrategy"]
+            # Ensure testStrategy is treated as a string, join if it's a list
             if isinstance(test_strategy, list):
                 test_strategy = "\n".join(test_strategy)
             description_parts.append(f"h2. Test Strategy\n{test_strategy}")
         
-        # Add dependencies
-        if task.get("dependencies"):
+        # Add dependencies (only for main tasks, subtasks implicitly depend on parent)
+        # This part assumes dependencies refer to other top-level tasks.
+        # If subtasks have explicit dependencies on other tasks/subtasks,
+        # more complex logic would be needed.
+        if "id" in task and task.get("dependencies"): # Only show dependencies for top-level tasks with IDs
             deps = ", ".join(map(str, task["dependencies"]))
             description_parts.append(f"h2. Dependencies\nTasks: {deps}")
         
         # Add metadata
-        description_parts.append(
-            f"h2. Metadata\n"
-            f"* Task ID: {task['id']}\n"
-            f"* Priority: {task.get('priority', 'medium')}\n"
+        metadata_parts = [
+            f"* Task ID: {task.get('id', 'N/A')}", # Use .get for robustness
+            f"* Priority: {task.get('priority', 'medium')}",
             f"* Status: {task.get('status', 'pending')}"
+        ]
+        if task.get("assignedTo"): # Add assignedTo if present in the task structure
+            metadata_parts.append(f"* Assigned To: {task['assignedTo']}")
+
+        description_parts.append(
+            f"h2. Metadata\n" + "\n".join(metadata_parts)
         )
         
         return "\n\n".join(description_parts)
     
     def resolve_dependencies(self, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Sort tasks based on dependencies."""
+        """Sort tasks based on dependencies using topological sort."""
         # Create a map of task_id -> task
         task_map = {task["id"]: task for task in tasks}
         
@@ -149,53 +174,89 @@ class JiraTaskCreator:
         
         # Topological sort
         visited = set()
+        recursion_stack = set() # To detect cycles
         result = []
         
         def dfs(task_id):
-            if task_id in visited:
-                return
             visited.add(task_id)
+            recursion_stack.add(task_id)
             
             for dep_id in graph[task_id]:
-                if dep_id in task_map:
+                if dep_id not in task_map:
+                    logger.warning(f"Dependency {dep_id} for task {task_id} not found in task list. Skipping.")
+                    continue
+                if dep_id not in visited:
                     dfs(dep_id)
+                elif dep_id in recursion_stack:
+                    logger.error(f"Cycle detected in dependencies involving task {task_id} and {dep_id}. This may lead to infinite loop or incorrect order.")
             
+            recursion_stack.remove(task_id)
             result.append(task_map[task_id])
         
         for task in tasks:
             if task["id"] not in visited:
                 dfs(task["id"])
         
-        return result
+        # Reverse the result to get correct topological order
+        return result[::-1]
     
     def create_tasks(self, tasks_data: Dict[str, Any], epic_key: Optional[str] = None, 
                     start_from: Optional[int] = None, dry_run: bool = False) -> None:
-        """Create all tasks from the tasks.json file."""
-        tasks = tasks_data["master"]["tasks"]
+        """Create all tasks and their sub-tasks from the tasks.json file."""
+        if "master" not in tasks_data or "tasks" not in tasks_data["master"]:
+            logger.error("Invalid tasks.json structure: 'master' or 'tasks' key not found.")
+            return
+
+        main_tasks = tasks_data["master"]["tasks"]
         
         # Filter tasks if start_from is specified
         if start_from:
-            tasks = [t for t in tasks if t["id"] >= start_from]
+            main_tasks = [t for t in main_tasks if t["id"] >= start_from]
         
-        # Resolve dependencies to create tasks in correct order
-        sorted_tasks = self.resolve_dependencies(tasks)
+        # Resolve dependencies to create main tasks in correct order
+        sorted_main_tasks = self.resolve_dependencies(main_tasks)
         
-        logger.info(f"Creating {len(sorted_tasks)} tasks...")
+        logger.info(f"Creating {len(sorted_main_tasks)} main tasks...")
         
-        for task in sorted_tasks:
+        for main_task in sorted_main_tasks:
+            logger.info(f"Processing main task: {main_task['title']} (ID: {main_task['id']})")
+            
+            main_issue_key = None
             if dry_run:
-                logger.info(f"[DRY RUN] Would create: {task['title']} (ID: {task['id']})")
-                self.created_issues[task["id"]] = f"DRY-{task['id']}"
+                main_issue_key = f"DRY-TASK-{main_task['id']}"
+                logger.info(f"[DRY RUN] Would create main task: {main_issue_key} - {main_task['title']}")
             else:
-                issue_key = self.create_issue(task, parent_key=epic_key)
-                if issue_key:
-                    self.created_issues[task["id"]] = issue_key
+                main_issue_key = self.create_issue(main_task, parent_key=epic_key, is_subtask=False)
+            
+            if main_issue_key:
+                self.created_issues[main_task["id"]] = main_issue_key
+                
+                # Check for and create sub-tasks
+                subtasks = main_task.get("subtasks", [])
+                if subtasks:
+                    logger.info(f"  Creating {len(subtasks)} sub-tasks for {main_issue_key}...")
+                    for subtask in subtasks:
+                        # Sub-tasks do not have their own dependencies in this model,
+                        # they implicitly depend on their parent.
+                        if dry_run:
+                            sub_issue_key = f"DRY-SUBTASK-{main_task['id']}-{subtask['id']}"
+                            logger.info(f"  [DRY RUN] Would create sub-task: {sub_issue_key} - {subtask['title']} under {main_issue_key}")
+                        else:
+                            sub_issue_key = self.create_issue(subtask, parent_key=main_issue_key, is_subtask=True)
+                        
+                        if sub_issue_key:
+                            # Store subtask ID with a composite key or similar if IDs are not unique across tasks
+                            # For simplicity, assuming subtask IDs are unique within a parent task.
+                            # If not, you might need a key like f"{main_task['id']}-{subtask['id']}"
+                            self.created_issues[f"{main_task['id']}-{subtask['id']}"] = sub_issue_key
+            else:
+                logger.error(f"Skipping sub-task creation for main task {main_task['id']} as parent issue was not created.")
         
-        logger.info("Task creation completed!")
+        logger.info("Task and sub-task creation completed!")
         logger.info(f"Created issues: {self.created_issues}")
     
     def create_epic(self, title: str = "TodoList Application Development", 
-                   description: str = "Epic for TodoList application development project") -> str:
+                   description: str = "Epic for TodoList application development project") -> Optional[str]:
         """Create an epic to group all tasks."""
         fields = {
             "project": {"key": self.project_key},
@@ -210,6 +271,8 @@ class JiraTaskCreator:
             return epic.key
         except JIRAError as e:
             logger.error(f"Failed to create epic: {e}")
+            if e.text:
+                logger.error(f"Jira API Error Details: {e.text}")
             return None
 
 def main():
@@ -229,8 +292,8 @@ def main():
     project_key = args.project_key or os.getenv("JIRA_PROJECT_KEY")
     
     if not all([base_url, email, api_token, project_key]):
-        print("Error: Missing required environment variables")
-        print("Required: JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY")
+        print("Error: Missing required environment variables", file=sys.stderr)
+        print("Required: JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY", file=sys.stderr)
         sys.exit(1)
     
     # Create Jira client
