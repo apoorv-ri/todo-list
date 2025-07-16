@@ -10,3 +10,16 @@ node_modules/
 /.env.development.local
 /.env.test.local
 /.env.production.local 
+
+# Cursor files
+.cursor/
+.roo/
+.taskmaster/
+# Ignore all .cursor files
+*.cursor
+# Ignore all .roo files
+*.roo
+*.roomodes
+# Ignore all .taskmaster files
+*.taskmaster
+*.windsurfrules

@@ -2,6 +2,9 @@ import os
 import shutil
 import subprocess
 import sys
+from load_dotenv import load_dotenv
+# Load environment variables from .env file
+load_dotenv()
 
 def generate_tasks():
     """
@@ -13,7 +16,7 @@ def generate_tasks():
     prd_file = "./docs/PRD.md" # Assuming PRD stands for Project/Product Requirements Document
     trd_file = "./docs/TRD.md"
     tsd_file = "./docs/TSD.md"
-    tasks_output_file = "./tasks/generated_tasks_2.md"
+    tasks_output_file = "./docs/generated_tasks.md"
     temp_input_file = "./.taskmaster_temp_input.txt" # Temporary file for combined input
 
     # Define the team roles for task assignment
@@ -60,24 +63,24 @@ def generate_tasks():
     # The bash script includes 'task-master init'.
     # This might be for initializing a project or configuration.
     # We'll run it, but note that its necessity depends on the actual CLI.
-    print("Running 'task-master init'...")
-    try:
-        init_process = subprocess.run(
-            [task_master_cli_path, "init"],
-            capture_output=True,
-            text=True,
-            check=False # Do not raise an exception for non-zero exit codes yet
-        )
-        if init_process.returncode == 0:
-            print("task-master init completed successfully.")
-        else:
-            print(f"Warning: 'task-master init' failed or returned non-zero exit code {init_process.returncode}.", file=sys.stderr)
-            print(f"Stdout: {init_process.stdout}", file=sys.stderr)
-            print(f"Stderr: {init_process.stderr}", file=sys.stderr)
-            # Decide if you want to exit here or continue. For now, it's a warning.
+    # print("Running 'task-master init'...")
+    # try:
+    #     init_process = subprocess.run(
+    #         [task_master_cli_path, "init"],
+    #         capture_output=True,
+    #         text=True,
+    #         check=False # Do not raise an exception for non-zero exit codes yet
+    #     )
+    #     if init_process.returncode == 0:
+    #         print("task-master init completed successfully.")
+    #     else:
+    #         print(f"Warning: 'task-master init' failed or returned non-zero exit code {init_process.returncode}.", file=sys.stderr)
+    #         print(f"Stdout: {init_process.stdout}", file=sys.stderr)
+    #         print(f"Stderr: {init_process.stderr}", file=sys.stderr)
+    #         # Decide if you want to exit here or continue. For now, it's a warning.
 
-    except Exception as e:
-        print(f"An error occurred during 'task-master init': {e}", file=sys.stderr)
+    # except Exception as e:
+    #     print(f"An error occurred during 'task-master init': {e}", file=sys.stderr)
         # Decide if you want to exit here or continue. For now, it's a warning.
 
 
