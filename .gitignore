@@ -25,3 +25,5 @@ node_modules/
 *.windsurfrules
 
 .DS_Store
+
+.gemini/
