@@ -1,0 +1,86 @@
+# .github/workflows/jira-transition-on-branch-create.yml
+
+name: Transition Jira on Branch Creation
+
+on:
+  create:
+
+jobs:
+  transition-jira-on-branch-creation:
+    if: github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract Jira ID from Branch Name
+        id: extract_jira_id
+        run: |
+          BRANCH_NAME="${{ github.event.ref }}"
+          BRANCH_URL="${{ github.server_url }}/${{ github.repository }}/tree/$BRANCH_NAME"
+          AUTHOR="${{ github.actor }}"
+
+          JIRA_IDS_RAW=$(echo "$BRANCH_NAME" | grep -oE '[A-Z]{2,}-[0-9]+' || true)
+          JIRA_IDS=$(echo -n "$JIRA_IDS_RAW" | sort -u | tr '\n' ' ' | sed 's/ *$//')
+
+          if [ -z "$JIRA_IDS" ]; then
+            echo "No Jira ticket ID found in branch name."
+            echo "jira_ids_found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found Jira IDs: $JIRA_IDS"
+            echo "jira_ids_found=true" >> "$GITHUB_OUTPUT"
+            echo "jira_ids=$JIRA_IDS" >> "$GITHUB_OUTPUT"
+            echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+            echo "branch_url=$BRANCH_URL" >> "$GITHUB_OUTPUT"
+            echo "author=$AUTHOR" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
+      - name: Install jq
+        if: steps.extract_jira_id.outputs.jira_ids_found == 'true'
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Post Branch Info to Jira
+        if: steps.extract_jira_id.outputs.jira_ids_found == 'true'
+        env:
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_IDS: ${{ steps.extract_jira_id.outputs.jira_ids }}
+          BRANCH_NAME: ${{ steps.extract_jira_id.outputs.branch_name }}
+          BRANCH_URL: ${{ steps.extract_jira_id.outputs.branch_url }}
+          AUTHOR: ${{ steps.extract_jira_id.outputs.author }}
+        run: |
+          set -e
+          AUTH_HEADER=$(printf "%s" "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" | base64 -w 0)
+          for JIRA_ID in $JIRA_IDS; do
+            COMMENT_BODY=$(jq -n \
+              --arg author "$AUTHOR" \
+              --arg branch_name "$BRANCH_NAME" \
+              --arg branch_url "$BRANCH_URL" \
+              '{body: ("Work started by *" + $author + "* on branch: [" + $branch_name + "|" + $branch_url + "]")}')
+            
+            curl --location --request POST \
+              -H "Authorization: Basic $AUTH_HEADER" \
+              -H "Content-Type: application/json" \
+              --data "$COMMENT_BODY" \
+              "$JIRA_BASE_URL/rest/api/2/issue/$JIRA_ID/comment"
+          done
+
+      - name: Transition Jira Ticket to "Done"
+        if: success() && steps.extract_jira_id.outputs.jira_ids_found == 'true' && env.JIRA_TRANSITION_ID_DONE != ''
+        env:
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_IDS: ${{ steps.extract_jira_id.outputs.jira_ids }}
+          JIRA_TRANSITION_ID: ${{ secrets.JIRA_TRANSITION_ID_DONE }}
+          JIRA_TRANSITION_ID_DONE: ${{ secrets.JIRA_TRANSITION_ID_DONE }}
+        run: |
+          set -e
+          AUTH_HEADER=$(printf "%s" "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" | base64 -w 0)
+          for JIRA_ID in $JIRA_IDS; do
+            TRANSITION_PAYLOAD=$(jq -n --arg id "$JIRA_TRANSITION_ID" '{transition: {id: $id}}')
+            curl --location --request POST \
+              -H "Authorization: Basic $AUTH_HEADER" \
+              -H "Content-Type: application/json" \
+              --data "$TRANSITION_PAYLOAD" \
+              "$JIRA_BASE_URL/rest/api/2/issue/$JIRA_ID/transitions"
+          done

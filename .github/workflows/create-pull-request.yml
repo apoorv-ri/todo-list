@@ -1,0 +1,42 @@
+# .github/workflows/create-pull-request.yml
+
+name: Create Pull Request
+
+# This workflow runs on pushes to any branch except 'main'.
+on: 
+  push:
+    branches-ignore:
+      - 'main'
+
+jobs:
+  create_pull_request:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      # Step 1: Checkout the repository code
+      # This is necessary for the GitHub CLI to have context of the repository.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Create the Pull Request
+      # This step uses the GitHub CLI (`gh`) to create a pull request.
+      # The `GITHUB_TOKEN` is automatically provided by GitHub and has the necessary permissions.
+      - name: Create Pull Request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH_NAME: ${{ github.ref_name }} # Gets the name of the branch that was pushed
+        run: |
+          echo "Attempting to create a Pull Request for branch: $BRANCH_NAME"
+          
+          # The `gh pr create` command will attempt to create a PR.
+          # If a PR for this branch already exists, the command will fail.
+          # The `|| true` part ensures that this failure does not stop the entire workflow.
+          gh pr create \
+            --base main \
+            --head "$BRANCH_NAME" \
+            --title "[Auto PR] Changes from $BRANCH_NAME" \
+            --body "This pull request was automatically created by a GitHub Action upon a push to the **$BRANCH_NAME** branch." \
+            || echo "Could not create pull request. It might already exist."

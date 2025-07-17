@@ -1,0 +1,92 @@
+# .github/workflows/jira-transition-on-pr-merge.yml
+
+name: Transition Jira on PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  transition-jira-on-merge:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract Jira ID and PR Details
+        id: extract_jira_id
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
+          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+          MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
+          MERGE_COMMIT_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+          MERGE_COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/$MERGE_COMMIT_SHA"
+
+          # Search for Jira ID in branch name, title, and body
+          SEARCH_STRING="$BRANCH_NAME $PR_TITLE $PR_BODY"
+          
+          JIRA_IDS_RAW=$(echo "$SEARCH_STRING" | grep -oE '[A-Z]{2,}-[0-9]+' || true)
+          JIRA_IDS=$(echo -n "$JIRA_IDS_RAW" | sort -u | tr '\n' ' ' | sed 's/ *$//')
+
+          if [ -z "$JIRA_IDS" ]; then
+            echo "No Jira ticket IDs found."
+            echo "jira_ids_found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found Jira IDs: $JIRA_IDS"
+            echo "jira_ids_found=true" >> "$GITHUB_OUTPUT"
+            echo "jira_ids=$JIRA_IDS" >> "$GITHUB_OUTPUT"
+            echo "merged_by=$MERGED_BY" >> "$GITHUB_OUTPUT"
+            echo "merge_commit_sha=$MERGE_COMMIT_SHA" >> "$GITHUB_OUTPUT"
+            echo "merge_commit_url=$MERGE_COMMIT_URL" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
+      - name: Install jq
+        if: steps.extract_jira_id.outputs.jira_ids_found == 'true'
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Post Merge Comment to Jira
+        if: steps.extract_jira_id.outputs.jira_ids_found == 'true'
+        env:
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_IDS: ${{ steps.extract_jira_id.outputs.jira_ids }}
+          MERGED_BY: ${{ steps.extract_jira_id.outputs.merged_by }}
+          MERGE_COMMIT_SHA: ${{ steps.extract_jira_id.outputs.merge_commit_sha }}
+          MERGE_COMMIT_URL: ${{ steps.extract_jira_id.outputs.merge_commit_url }}
+        run: |
+          set -e
+          AUTH_HEADER=$(printf "%s" "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" | base64 -w 0)
+          for JIRA_ID in $JIRA_IDS; do
+            COMMENT_BODY=$(jq -n \
+              --arg merged_by "$MERGED_BY" \
+              --arg commit_sha "$MERGE_COMMIT_SHA" \
+              --arg commit_url "$MERGE_COMMIT_URL" \
+              '{body: ("PR merged by *" + $merged_by + "*. See merge commit: [" + $commit_sha + "|" + $commit_url + "]")}')
+            
+            curl --location --request POST \
+              -H "Authorization: Basic $AUTH_HEADER" \
+              -H "Content-Type: application/json" \
+              --data "$COMMENT_BODY" \
+              "$JIRA_BASE_URL/rest/api/2/issue/$JIRA_ID/comment"
+          done
+
+      - name: Transition Jira Ticket to "Done"
+        if: success() && steps.extract_jira_id.outputs.jira_ids_found == 'true' && env.JIRA_TRANSITION_ID_DONE != ''
+        env:
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_IDS: ${{ steps.extract_jira_id.outputs.jira_ids }}
+          JIRA_TRANSITION_ID: ${{ secrets.JIRA_TRANSITION_ID_DONE }}
+        run: |
+          set -e
+          AUTH_HEADER=$(printf "%s" "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" | base64 -w 0)
+          for JIRA_ID in $JIRA_IDS; do
+            TRANSITION_PAYLOAD=$(jq -n --arg id "$JIRA_TRANSITION_ID" '{transition: {id: $id}}')
+            curl --location --request POST \
+              -H "Authorization: Basic $AUTH_HEADER" \
+              -H "Content-Type: application/json" \
+              --data "$TRANSITION_PAYLOAD" \
+              "$JIRA_BASE_URL/rest/api/2/issue/$JIRA_ID/transitions"
+          done

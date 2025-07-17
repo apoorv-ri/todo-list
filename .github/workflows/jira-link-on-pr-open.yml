@@ -1,0 +1,90 @@
+# .github/workflows/jira-link-on-pr-open.yml
+
+name: Link PR to Jira Ticket
+
+on:
+  pull_request:
+    types: [opened, edited]
+
+jobs:
+  link-pr-to-jira:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract Jira ID from PR Title/Body
+        id: extract_jira_id
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          PR_AUTHOR="${{ github.event.pull_request.user.login }}"
+
+          # Combine title and body to search for Jira ID
+          SEARCH_STRING="$PR_TITLE $PR_BODY"
+          
+          JIRA_IDS_RAW=$(echo "$SEARCH_STRING" | grep -oE '[A-Z]{2,}-[0-9]+' || true)
+          JIRA_IDS=$(echo -n "$JIRA_IDS_RAW" | sort -u | tr '\n' ' ' | sed 's/ *$//')
+
+          if [ -z "$JIRA_IDS" ]; then
+            echo "No Jira ticket IDs found in PR title or body."
+            echo "jira_ids_found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found Jira IDs: $JIRA_IDS"
+            echo "jira_ids_found=true" >> "$GITHUB_OUTPUT"
+            echo "jira_ids=$JIRA_IDS" >> "$GITHUB_OUTPUT"
+            echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+            echo "pr_title=$PR_TITLE" >> "$GITHUB_OUTPUT"
+            echo "pr_author=$PR_AUTHOR" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
+      - name: Install jq
+        if: steps.extract_jira_id.outputs.jira_ids_found == 'true'
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Post Link to Jira Ticket
+        if: steps.extract_jira_id.outputs.jira_ids_found == 'true'
+        env:
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_IDS: ${{ steps.extract_jira_id.outputs.jira_ids }}
+          PR_URL: ${{ steps.extract_jira_id.outputs.pr_url }}
+          PR_TITLE: ${{ steps.extract_jira_id.outputs.pr_title }}
+          PR_AUTHOR: ${{ steps.extract_jira_id.outputs.pr_author }}
+        run: |
+          set -e
+          AUTH_HEADER=$(printf "%s" "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" | base64 -w 0)
+          for JIRA_ID in $JIRA_IDS; do
+            COMMENT_BODY=$(jq -n \
+              --arg author "$PR_AUTHOR" \
+              --arg title "$PR_TITLE" \
+              --arg url "$PR_URL" \
+              '{body: ("Pull Request opened by *" + $author + "*: [" + $title + "|" + $url + "]")}')
+            
+            curl --location --request POST \
+              -H "Authorization: Basic $AUTH_HEADER" \
+              -H "Content-Type: application/json" \
+              --data "$COMMENT_BODY" \
+              "$JIRA_BASE_URL/rest/api/2/issue/$JIRA_ID/comment"
+          done
+
+      - name: Transition Jira Ticket to "In Review"
+        if: success() && steps.extract_jira_id.outputs.jira_ids_found == 'true' && env.JIRA_TRANSITION_ID_IN_REVIEW != ''
+        env:
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_IDS: ${{ steps.extract_jira_id.outputs.jira_ids }}
+          JIRA_TRANSITION_ID: ${{ secrets.JIRA_TRANSITION_ID_IN_REVIEW }}
+          JIRA_TRANSITION_ID_IN_REVIEW: ${{ secrets.JIRA_TRANSITION_ID_IN_REVIEW }}
+        run: |
+          set -e
+          AUTH_HEADER=$(printf "%s" "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" | base64 -w 0)
+          for JIRA_ID in $JIRA_IDS; do
+            TRANSITION_PAYLOAD=$(jq -n --arg id "$JIRA_TRANSITION_ID" '{transition: {id: $id}}')
+            curl --location --request POST \
+              -H "Authorization: Basic $AUTH_HEADER" \
+              -H "Content-Type: application/json" \
+              --data "$TRANSITION_PAYLOAD" \
+              "$JIRA_BASE_URL/rest/api/2/issue/$JIRA_ID/transitions"
+          done

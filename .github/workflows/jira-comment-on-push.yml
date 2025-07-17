@@ -1,0 +1,151 @@
+# .github/workflows/jira-comment-on-push.yml
+
+name: Jira Comment on Commit Push
+
+# This workflow will run on every push to any branch.
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  update-jira-ticket:
+    runs-on: ubuntu-latest # The type of runner that the job will run on
+
+    steps:
+      # Step 1: Checkout the repository code
+      # This action checks out your repository under $GITHUB_WORKSPACE,
+      # so your workflow can access it.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Extract commit details and Jira ticket IDs
+      - name: Extract Commit Details and Jira ID
+        id: extract_info # Assign an ID to this step to reference its outputs
+        run: |
+          set -e  # Exit on any error
+          
+          # Validate required environment (for later steps)
+          if [ -z "${{ secrets.JIRA_USER_EMAIL }}" ] || [ -z "${{ secrets.JIRA_API_TOKEN }}" ] || [ -z "${{ secrets.JIRA_BASE_URL }}" ]; then
+            echo "Warning: Missing required Jira secrets. Workflow will skip Jira updates."
+          fi
+
+          # Get the full commit message (title + body)
+          COMMIT_MESSAGE=$(git log -1 --pretty=%B)
+          echo "Full Commit Message: $COMMIT_MESSAGE"
+
+          # Get the commit SHA
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "Commit SHA: $COMMIT_SHA"
+
+          # Get the short commit SHA for linking
+          SHORT_COMMIT_SHA=$(echo $COMMIT_SHA | cut -c1-7)
+          echo "Short Commit SHA: $SHORT_COMMIT_SHA"
+
+          # Get the commit author
+          COMMIT_AUTHOR=$(git log -1 --pretty=format:'%an')
+          echo "Commit Author: $COMMIT_AUTHOR"
+
+          # Get the commit URL
+          COMMIT_URL="${{ github.server_url }}/${{ github.repository }}/commit/$COMMIT_SHA"
+          echo "Commit URL: $COMMIT_URL"
+
+          # Extract Jira ticket IDs from the commit message.
+          # The `|| true` prevents the script from exiting with an error if `grep` finds no matches.
+          JIRA_IDS_RAW=$(echo "$COMMIT_MESSAGE" | grep -oE '[A-Z]{2,}-[0-9]+' || true)
+          echo "Raw Jira IDs: $JIRA_IDS_RAW"
+          
+          # Process the raw IDs to remove duplicates and format properly
+          JIRA_IDS=$(echo -n "$JIRA_IDS_RAW" | sort -u | tr '\n' ' ' | sed 's/ *$//')
+          echo "Processed Jira IDs: $JIRA_IDS"
+
+          if [ -z "$JIRA_IDS" ]; then
+            echo "No Jira ticket IDs found in the commit message. Skipping Jira update."
+            # Use the new method for setting step outputs.
+            echo "jira_ids_found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found Jira IDs: $JIRA_IDS"
+            # Use the new method for setting step outputs.
+            echo "jira_ids_found=true" >> "$GITHUB_OUTPUT"
+            echo "jira_ids=$JIRA_IDS" >> "$GITHUB_OUTPUT"
+            echo "commit_url=$COMMIT_URL" >> "$GITHUB_OUTPUT"
+            echo "commit_author=$COMMIT_AUTHOR" >> "$GITHUB_OUTPUT"
+            echo "short_commit_sha=$SHORT_COMMIT_SHA" >> "$GITHUB_OUTPUT"
+            # Handle multi-line commit messages by using a delimiter with GITHUB_OUTPUT
+            echo 'commit_message<<EOF' >> "$GITHUB_OUTPUT"
+            echo "$COMMIT_MESSAGE" >> "$GITHUB_OUTPUT"
+            echo 'EOF' >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
+      # Step 2.5: Install jq (only if Jira IDs were found)
+      - name: Install jq
+        if: steps.extract_info.outputs.jira_ids_found == 'true'
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      # Step 3: Post comment to Jira (conditional on finding Jira IDs)
+      - name: Post Commit Details to Jira
+        # This step will only run if jira_ids_found is true from the previous step
+        if: steps.extract_info.outputs.jira_ids_found == 'true'
+        env:
+          JIRA_USER_EMAIL: ${{ secrets.JIRA_USER_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_IDS: ${{ steps.extract_info.outputs.jira_ids }}
+          COMMIT_MESSAGE: ${{ steps.extract_info.outputs.commit_message }}
+          COMMIT_URL: ${{ steps.extract_info.outputs.commit_url }}
+          COMMIT_AUTHOR: ${{ steps.extract_info.outputs.commit_author }}
+          SHORT_COMMIT_SHA: ${{ steps.extract_info.outputs.short_commit_sha }}
+        run: |
+          set -e  # Exit on any error
+          
+          # Validate required environment variables
+          if [ -z "$JIRA_USER_EMAIL" ] || [ -z "$JIRA_API_TOKEN" ] || [ -z "$JIRA_BASE_URL" ]; then
+            echo "Error: Missing required Jira credentials (JIRA_USER_EMAIL, JIRA_API_TOKEN, or JIRA_BASE_URL)"
+            exit 1
+          fi
+
+          # Encode credentials for Basic Authentication
+          AUTH_HEADER=$(printf "%s" "$JIRA_USER_EMAIL:$JIRA_API_TOKEN" | base64 -w 0)
+          
+          # Loop through each found Jira ID and post a comment
+          for JIRA_ID in $JIRA_IDS; do
+            echo "Attempting to update Jira ticket: $JIRA_ID"
+
+            # Use jq to safely construct the JSON payload.
+            # This prevents errors from special characters in the commit message.
+            COMMENT_BODY=$(jq -n \
+              --arg author "$COMMIT_AUTHOR" \
+              --arg sha "$SHORT_COMMIT_SHA" \
+              --arg url "$COMMIT_URL" \
+              --arg msg "$COMMIT_MESSAGE" \
+              '{body: ("New commit by *" + $author + "*:\n\n{quote}" + $msg + "{quote}\n\nSee commit [" + $sha + "|" + $url + "]")}')
+
+            if [ -z "$COMMENT_BODY" ]; then
+              echo "Error: Failed to construct JSON payload for Jira ticket $JIRA_ID"
+              exit 1
+            fi
+
+            # Make the API call to Jira to add a comment
+            CURL_RESPONSE=$(curl --location -s -w "\n%{http_code}" --max-time 30 -X POST \
+              -H "Authorization: Basic $AUTH_HEADER" \
+              -H "Content-Type: application/json" \
+              --data "$COMMENT_BODY" \
+              "$JIRA_BASE_URL/rest/api/2/issue/$JIRA_ID/comment")
+
+            if [ -z "$CURL_RESPONSE" ]; then
+              echo "Error: curl command failed for Jira ticket $JIRA_ID"
+              exit 1
+            fi
+
+            HTTP_CODE=$(echo "$CURL_RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$CURL_RESPONSE" | head -n-1)
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              echo "Successfully posted comment to Jira ticket $JIRA_ID"
+            else
+              echo "Failed to post comment to Jira ticket $JIRA_ID. HTTP Status: $HTTP_CODE, Response: $RESPONSE_BODY"
+              exit 1 # Fail the workflow if any Jira update fails
+            fi  
+          done
+        shell: bash
