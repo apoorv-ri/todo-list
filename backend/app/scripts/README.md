@@ -1,5 +1,6 @@
 # List of commands to run the scripts in sequence
-# Ensure you have the necessary environment variables set in your .env file
+
+### Ensure you have the necessary environment variables set in your .env file
 
 # Step 1: Generate PRD
 python app/scripts/step1_generate_prd.py
@@ -17,4 +18,4 @@ python app/scripts/step4_generate_tasks.py
 python app/scripts/step5_generate_jira_tasks.py
 
 # Step 6: Generate Gnatt Chart
-python app/scripts/step5_generate_gnatt_chart.py <Path of tasks.json> ./docs/gantt_chart.html 
+python app/scripts/step5_generate_gnatt_chart.py \<Path of tasks.json\> ./docs/gantt_chart.html 

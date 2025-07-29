@@ -212,6 +212,77 @@ The input variables, with their default values (some auto generated) are:
 - `postgres_password`: (default: `"changethis"`) The password for the PostgreSQL database, stored in .env, you can generate one with the method above.
 - `sentry_dsn`: (default: "") The DSN for Sentry, if you are using it, you can set it later in .env.
 
+## Automated Project Documentation and Task Management
+
+This project includes a set of scripts to automate the generation of project documentation and the creation of development tasks. These scripts can significantly speed up the initial phases of a project by automatically creating:
+
+-   **Product Requirements Document (PRD):** Generated from a high-level project description.
+-   **Technical System Design (TSD):** Generated from the PRD.
+-   **Technical Requirements Document (TRD):** Generated from the PRD.
+-   **Development Tasks:** A detailed list of tasks and sub-tasks derived from the generated documentation.
+-   **Gantt Chart:** An interactive Gantt chart to visualize the project timeline.
+-   **Jira Tasks:** Automatically create tasks and sub-tasks in your Jira project.
+
+For detailed instructions on how to use these automation scripts, please refer to the [documentation in the scripts directory](./backend/app/scripts/README.md).
+
+## CI/CD Automation with Jira
+
+Your project is configured with a comprehensive set of GitHub Actions workflows that automate the integration between your GitHub repository and your Jira project. These automations streamline your development process by keeping your Jira tickets synchronized with your code changes, pull requests, and branches.
+
+Here's a detailed breakdown of each automation:
+
+### 1. `jira-comment-on-push.yml`
+
+**Purpose:** Automatically adds a comment to a Jira ticket every time a commit is pushed to any branch.
+
+**How it works:**
+
+1.  **Triggers on Push:** The workflow runs whenever a `git push` is detected.
+2.  **Extracts Information:** It inspects the commit message to find one or more Jira ticket IDs (e.g., `PROJ-123`).
+3.  **Posts to Jira:** If a Jira ID is found, it posts a comment to the corresponding ticket with the commit message, the author, and a direct link to the commit on GitHub.
+
+**Benefit:** This keeps the Jira ticket updated with a real-time log of all the commits related to it, providing clear traceability from the task to the code.
+
+### 2. `jira-link-on-pr-open.yml`
+
+**Purpose:** Links a pull request to a Jira ticket and transitions the ticket to "In Review" when a PR is opened or edited.
+
+**How it works:**
+
+1.  **Triggers on Pull Request:** The workflow is activated when a pull request is opened or its title/body is edited.
+2.  **Finds Jira ID:** It searches the pull request's title and body for a Jira ticket ID.
+3.  **Links PR to Jira:** If an ID is found, it posts a comment on the Jira ticket with a link to the pull request.
+4.  **Transitions Ticket:** It then automatically transitions the Jira ticket to your "In Review" status (or a similar status you've configured), signaling that the work is ready for review.
+
+**Benefit:** This automation saves developers the manual step of updating the Jira ticket's status and ensures that reviewers have a direct link from the Jira ticket to the code they need to review.
+
+### 3. `jira-transition-on-branch-create.yml`
+
+**Purpose:** Transitions a Jira ticket to "In Progress" as soon as a developer creates a new branch for that ticket.
+
+**How it works:**
+
+1.  **Triggers on Branch Creation:** The workflow runs when a new branch is created in the repository.
+2.  **Extracts Jira ID from Branch Name:** It expects the branch name to contain the Jira ticket ID (e.g., `feature/PROJ-123-new-login-flow`).
+3.  **Updates Jira:** If an ID is found, it posts a comment to the Jira ticket with a link to the new branch and transitions the ticket to "In Progress."
+
+**Benefit:** This provides immediate visibility in Jira that work has started on a task, without the developer having to manually update the ticket.
+
+### 4. `jira-transition-on-pr-merge.yml`
+
+**Purpose:** Transitions a Jira ticket to "Done" when a pull request is merged.
+
+**How it works:**
+
+1.  **Triggers on PR Merge:** The workflow is activated when a pull request is merged.
+2.  **Finds Jira ID:** It searches for the Jira ticket ID in the branch name, PR title, and PR body.
+3.  **Posts Merge Info:** It posts a comment to the Jira ticket with a link to the merge commit, confirming that the code has been integrated.
+4.  **Closes Ticket:** It then automatically transitions the Jira ticket to your "Done" status (or a similar status), marking the task as complete.
+
+**Benefit:** This closes out the development loop automatically, ensuring that the Jira board accurately reflects the state of your project without any manual intervention.
+
+In summary, these CI/CD automations create a seamless and efficient workflow between your code repository and your project management tool. They reduce administrative overhead, improve communication, and provide a clear and consistent record of your development process.
+
 ## Backend Development
 
 Backend docs: [backend/README.md](./backend/README.md).
