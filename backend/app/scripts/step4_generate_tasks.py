@@ -17,7 +17,7 @@ def generate_tasks():
     trd_file = "./docs/TRD.md"
     tsd_file = "./docs/TSD.md"
     tasks_output_file = "./docs/generated_tasks.md"
-    temp_input_file = "./.taskmaster_temp_input.txt" # Temporary file for combined input
+    temp_input_file = os.path.abspath("./.taskmaster_temp_input.txt") # Temporary file for combined input
 
     # Define the team roles for task assignment
     TEAM_ROLES="""
@@ -139,6 +139,7 @@ Break down larger tasks into logical sub-tasks. Ensure all aspects mentioned in 
             text=True,
             bufsize=1 # Line-buffered output for streaming
         )
+        print('-======================')
 
         # Stream output to file
         with open(tasks_output_file, 'w') as f_out:
@@ -150,6 +151,8 @@ Break down larger tasks into logical sub-tasks. Ensure all aspects mentioned in 
 
         # Wait for the subprocess to complete and get its return code
         process.wait()
+
+        print('-======================')
 
         # Check the return code of the subprocess
         if process.returncode == 0:
